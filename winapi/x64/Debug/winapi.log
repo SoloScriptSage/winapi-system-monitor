@@ -1,4 +1,9 @@
-﻿  main.cpp
-D:\Projects\winapi\winapi\main.cpp(177,54): error C2065: 'lastCPUAlert': undeclared identifier
-D:\Projects\winapi\winapi\main.cpp(215,71): error C2065: 'lastRAMAlert': undeclared identifier
-D:\Projects\winapi\winapi\main.cpp(240,59): error C2065: 'lastRAMAlert': undeclared identifier
+﻿  alerts.cpp
+  disk_monitor.cpp
+  globals.cpp
+  globals.h
+  gpu_monitor.cpp
+  main.cpp
+  Generating Code...
+x64\Debug\globals.obj : warning LNK4042: object specified more than once; extras ignored
+  winapi.vcxproj -> D:\Projects\software-and-systems\winapi-system-monitor\x64\Debug\winapi.exe

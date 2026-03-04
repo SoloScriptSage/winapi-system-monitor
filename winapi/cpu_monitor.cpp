@@ -4,32 +4,11 @@
 
 using namespace std;
 
-// NTSTATUS: This is the return type of the function. 
-// It’s a Windows-specific data type used to represent status codes for functions. 
-// The function will return an NTSTATUS value, which is typically used to indicate success or error codes.
-
-// WINAPI: This is the calling convention of the function.
-// It tells the compiler how the function’s parameters should be passed and how the function should return.
-
-// pNtQuerySystemInformation: This is a pointer to the NtQuerySystemInformation function.
-// It’s a function pointer that will be used to call the NtQuerySystemInformation function dynamically.
-
-// The code defines a function pointer type, pNtQuerySystemInformation, 
-// which points to a function that can retrieve system information on Windows. 
-// You would use this to call NtQuerySystemInformation, passing in the 
-// right parameters to get specific system data (like process information, memory details, etc.).
-// This is typically used in low - level Windows programming, often for things like system monitoring or debugging.
-
 typedef NTSTATUS(WINAPI* pNtQuerySystemInformation)(
 	ULONG SystemInformationClass, // identifier that specifies the type of system information you want to retrieve (like system performance data, process information, etc.).
 	PVOID SystemInformation, // A pointer to a buffer where the requested system information will be returned.
 	ULONG SystemInformationLength, // The size of the buffer in bytes.
 	PULONG ReturnLength); // A pointer to a variable that will receive the size of the returned system information.
-
-// The constant SystemProcessorPerformanceInformation corresponds to a specific type of information 
-// that NtQuerySystemInformation can return. In this case, it is used 
-// to request processor performance information, such as the usage statistics of the CPUs.
-// 8 – SystemProcessorPerformanceInformation(Processor performance statistics, like CPU usage, etc.)
 
 #define SystemProcessorPerformanceInformation 8
 
@@ -126,13 +105,18 @@ void PrintPerCoreCPUUsage() {
 		// Clamp the value between 0 and 100
 		usage = max(0.0, min(usage, 100.0));
 
-		if (usage > CPU_ALERT_THRESHOLD && ShouldShowAlert(lastCPUAlert)) {
-			cpuOverloaded = true;
-		}
+
 		wstringstream stream;
 		stream << fixed << setprecision(2) << usage; // Set the precision of the stream
 
 		usageText += L"CPU Core " + std::to_wstring(i) + L": " + stream.str() + L"% usage\n"; // Add the CPU usage to the text
+
+		// After the loop, add:
+		static double totalUsage = 0.0;
+		totalUsage += usage;
+		// After the loop ends:
+		currentCPUUsage = (int)(totalUsage / numProcessors);
+		totalUsage = 0.0;
 	}
 
 	// Update the CPU label

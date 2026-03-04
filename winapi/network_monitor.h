@@ -9,8 +9,7 @@
 
 #pragma comment(lib, "iphlpapi.lib")
 
-// Function declarations
-void GetNetworkUsage(HWND hWND);
+void GetNetworkUsage();
 void UpdateNetworkUsage();
 
 #endif // NETWORK_MONITOR_H

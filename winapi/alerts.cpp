@@ -4,10 +4,6 @@
 using namespace std;
 using namespace chrono;
 
-int currentCPUUsage;  // Assume this is updated in `cpu_monitor.cpp`
-int currentRAMUsage;  // Assume this is updated in `ram_monitor.cpp`
-int currentDiskUsage; // Assume this is updated in `disk_monitor.cpp`
-
 const int ALERT_INTERVAL = 30; // Alert interval in seconds
 
 bool ShouldShowAlert(steady_clock::time_point& lastAlertTime) {
@@ -28,7 +24,7 @@ void CheckAndShowAlerts() {
     if (currentRAMUsage > MEMORY_ALERT_THRESHOLD && ShouldShowAlert(lastRAMAlert)) {
         MessageBox(NULL, L"High RAM Usage! Close unused programs.", L"RAM Alert", MB_OK | MB_ICONWARNING);
     }
-    if (currentDiskUsage > DISK_ALERT_THRESHOLD && ShouldShowAlert(lastDiskAlert)) {
+    if (currentDiskSpace > DISK_ALERT_THRESHOLD && ShouldShowAlert(lastDiskAlert)) {
         MessageBox(NULL, L"High Disk Usage! Free up space.", L"Disk Alert", MB_OK | MB_ICONWARNING);
     }
 }

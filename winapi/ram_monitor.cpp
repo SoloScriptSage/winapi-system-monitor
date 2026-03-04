@@ -11,10 +11,7 @@ void GetMemoryUsage(HWND hWND) {
 		swprintf(buffer, 256, L"Memory Load: %ld%%\n", statex.dwMemoryLoad); // Print the memory load
 		SetWindowText(hWND, buffer); // Set the text of the window
 
-		// Check if the memory load is above the threshold
-		if (statex.dwMemoryLoad > MEMORY_ALERT_THRESHOLD && ShouldShowAlert(lastRAMAlert)) {
-			MessageBox(NULL, L"High Memory Usage Detected! Close some apps.", L"Memory Alert", MB_OK | MB_ICONWARNING); // Display a message box
-		}
+		currentRAMUsage = (int)statex.dwMemoryLoad;
 	}
 }// Thread function for updating memory usage
 void UpdateMemoryUsage() {

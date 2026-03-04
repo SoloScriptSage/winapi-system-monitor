@@ -1,66 +1,58 @@
 #include "network_monitor.h"
 #include "globals.h"
 
-// Function to get the network information
-void GetNetworkUsage(HWND hWND) {
-	MIB_IFTABLE* pIfTable;
-	DWORD dwSize = 0;
-	DWORD dwRetVal = 0;
+void GetNetworkUsage() {
+    MIB_IFTABLE* pIfTable;
+    DWORD dwSize = 0;
+    DWORD dwRetVal = 0;
 
-	if (GetIfTable(NULL, &dwSize, false) == ERROR_INSUFFICIENT_BUFFER) {
-		pIfTable = (MIB_IFTABLE*)malloc(dwSize);
-		if (pIfTable == NULL) {
-			SetWindowText(hWND, L"Network Usage: Memory Error");
-			return;
-		}
-	}
-	else {
-		SetWindowText(hWND, L"Network Usage: Failed");
-		return;
-	}
+    if (GetIfTable(NULL, &dwSize, false) == ERROR_INSUFFICIENT_BUFFER) {
+        pIfTable = (MIB_IFTABLE*)malloc(dwSize);
+        if (pIfTable == NULL) {
+            currentNetworkUp = 0.0;
+            currentNetworkDown = 0.0;
+            return;
+        }
+    }
+    else {
+        currentNetworkUp = 0.0;
+        currentNetworkDown = 0.0;
+        return;
+    }
 
-	if ((dwRetVal = GetIfTable(pIfTable, &dwSize, false)) == NO_ERROR) {
-		ULONGLONG totalSent = 0, totalReceived = 0;
+    if ((dwRetVal = GetIfTable(pIfTable, &dwSize, false)) == NO_ERROR) {
+        ULONGLONG totalSent = 0, totalReceived = 0;
 
-		for (DWORD i = 0; i < pIfTable->dwNumEntries; i++) {
-			// Prefer ullOutOctets if available (64-bit)
-			ULONGLONG sentBytes = (pIfTable->table[i].dwOutOctets);
-			ULONGLONG receivedBytes = (pIfTable->table[i].dwInOctets);
+        for (DWORD i = 0; i < pIfTable->dwNumEntries; i++) {
+            if (pIfTable->table[i].dwType == IF_TYPE_ETHERNET_CSMACD ||
+                pIfTable->table[i].dwType == IF_TYPE_IEEE80211) {
+                totalSent += pIfTable->table[i].dwOutOctets;
+                totalReceived += pIfTable->table[i].dwInOctets;
+            }
+        }
 
-			if (pIfTable->table[i].dwType == IF_TYPE_ETHERNET_CSMACD ||
-				pIfTable->table[i].dwType == IF_TYPE_IEEE80211) { // Ethernet or WiFi
-				totalSent += sentBytes;
-				totalReceived += receivedBytes;
-			}
-		}
+        static ULONGLONG prevSent = 0, prevReceived = 0;
 
-		static ULONGLONG prevSent = 0, prevReceived = 0;
+        if (prevSent > totalSent)     prevSent = totalSent;
+        if (prevReceived > totalReceived) prevReceived = totalReceived;
 
-		// Handle counter resets (e.g., if network interface is reconnected)
-		if (prevSent > totalSent) prevSent = totalSent;
-		if (prevReceived > totalReceived) prevReceived = totalReceived;
+        currentNetworkUp = (totalSent - prevSent) / 1024.0;
+        currentNetworkDown = (totalReceived - prevReceived) / 1024.0;
 
-		ULONGLONG sentSpeed = totalSent - prevSent;
-		ULONGLONG receivedSpeed = totalReceived - prevReceived;
+        prevSent = totalSent;
+        prevReceived = totalReceived;
+    }
+    else {
+        currentNetworkUp = 0.0;
+        currentNetworkDown = 0.0;
+    }
 
-		prevSent = totalSent;
-		prevReceived = totalReceived;
-
-		wchar_t buffer[256];
-		swprintf(buffer, 256, L"Upload: %.2f KB/s | Download: %.2f KB/s",
-			sentSpeed / 1024.0, receivedSpeed / 1024.0);
-		SetWindowText(hWND, buffer);
-	}
-	else {
-		SetWindowText(hWND, L"Network Usage: Error");
-	}
-
-	free(pIfTable);
+    free(pIfTable);
 }
 
 void UpdateNetworkUsage() {
-	while (updateFlag) {
-		GetNetworkUsage(hNetwork);
-		this_thread::sleep_for(chrono::seconds(1)); // Update every second
-	}
+    while (updateFlag) {
+        GetNetworkUsage();
+        this_thread::sleep_for(chrono::seconds(1));
+    }
 }

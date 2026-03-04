@@ -1,5 +1,4 @@
-#include "main.h" // Include the software definitions header file
-
+﻿#include "main.h"
 #include "ui.h"
 #include "cpu_monitor.h"
 #include "ram_monitor.h"
@@ -9,285 +8,291 @@
 #include "alerts.h"
 #include "globals.h"
 
-#pragma comment(lib, "iphlpapi.lib") // Link the iphlpapi library
+#pragma comment(lib, "iphlpapi.lib")
 
 #define WM_START_THREADS (WM_USER + 1)
 
 using namespace std;
 using namespace chrono;
 
-thread cpuThread; // Thread for updating CPU usage
-thread ramThread; // Thread for updating RAM usage
-thread diskThread; // Thread for updating disk usage
-thread networkThread; // Thread for updating network usage
+thread cpuThread;
+thread ramThread;
+thread diskThread;
+thread networkThread;
+thread alertThread;
+thread gpuThread;
 
+// ─── Color scheme ─────────────────────────────────────────────────────────────
+#define CLR_BG       RGB(15,  15,  25)
+#define CLR_PANEL    RGB(25,  25,  40)
+#define CLR_BORDER   RGB(50,  50,  80)
+#define CLR_TEXT     RGB(220, 220, 230)
+#define CLR_DIM      RGB(130, 130, 150)
+#define CLR_BAR_BG   RGB(45,  45,  60)
+#define CLR_CPU      RGB(86,  156, 214)
+#define CLR_RAM      RGB(78,  201, 176)
+#define CLR_DISK     RGB(220, 140, 50)
+#define CLR_NET      RGB(106, 200, 106)
+#define CLR_NVIDIA   RGB(118, 185, 0)
+#define CLR_AMD      RGB(237, 100, 80)
+
+static HFONT g_font = nullptr;
+static HFONT g_fontBold = nullptr;
+
+static void InitFonts() {
+    g_font = CreateFontA(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, "Consolas");
+    g_fontBold = CreateFontA(13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, "Consolas");
+}
+
+static void DrawBar(HDC hdc, RECT r, float pct, COLORREF color) {
+    HBRUSH bg = CreateSolidBrush(CLR_BAR_BG);
+    FillRect(hdc, &r, bg);
+    DeleteObject(bg);
+
+    pct = max(0.0f, min(pct, 100.0f));
+    int fillW = (int)((r.right - r.left) * (pct / 100.0f));
+    if (fillW > 0) {
+        RECT fill = { r.left, r.top, r.left + fillW, r.bottom };
+        HBRUSH fb = CreateSolidBrush(color);
+        FillRect(hdc, &fill, fb);
+        DeleteObject(fb);
+    }
+}
+
+static void DrawPanel(HDC hdc, RECT r, COLORREF accent, LPCWSTR title) {
+    // Background
+    HBRUSH pb = CreateSolidBrush(CLR_PANEL);
+    FillRect(hdc, &r, pb);
+    DeleteObject(pb);
+
+    // Border
+    HPEN pen = CreatePen(PS_SOLID, 1, CLR_BORDER);
+    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, r.left, r.top, r.right, r.bottom);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+
+    // Accent bar on left edge
+    RECT accent_bar = { r.left, r.top, r.left + 3, r.bottom };
+    HBRUSH ab = CreateSolidBrush(accent);
+    FillRect(hdc, &accent_bar, ab);
+    DeleteObject(ab);
+
+    // Title
+    SelectObject(hdc, g_fontBold);
+    SetTextColor(hdc, accent);
+    SetBkMode(hdc, TRANSPARENT);
+    RECT tr = { r.left + 12, r.top + 8, r.right - 8, r.top + 26 };
+    DrawTextW(hdc, title, -1, &tr, DT_LEFT | DT_SINGLELINE);
+}
+
+static void DrawText2(HDC hdc, int x, int y, int w, LPCWSTR text, COLORREF color) {
+    SelectObject(hdc, g_font);
+    SetTextColor(hdc, color);
+    RECT r = { x, y, x + w, y + 18 };
+    DrawTextW(hdc, text, -1, &r, DT_LEFT | DT_SINGLELINE);
+}
+
+static void PaintAll(HDC hdc) {
+    wchar_t buf[256];
+
+    // ── CPU ──────────────────────────────────────────────────────────────────
+    RECT cpu = { 15, 15, 395, 185 };
+    DrawPanel(hdc, cpu, CLR_CPU, L"CPU");
+    swprintf(buf, 256, L"Usage:   %d%%", currentCPUUsage);
+    DrawText2(hdc, 27, 32, 355, buf, CLR_TEXT);
+    DrawBar(hdc, { 27, 155, 383, 169 }, (float)currentCPUUsage, CLR_CPU);
+
+    // ── RAM ──────────────────────────────────────────────────────────────────
+    RECT ram = { 405, 15, 785, 185 };
+    DrawPanel(hdc, ram, CLR_RAM, L"MEMORY");
+    swprintf(buf, 256, L"Load:    %d%%", currentRAMUsage);
+    DrawText2(hdc, 417, 32, 355, buf, CLR_TEXT);
+    DrawBar(hdc, { 417, 155, 773, 169 }, (float)currentRAMUsage, CLR_RAM);
+
+    // ── DISK ─────────────────────────────────────────────────────────────────
+    RECT disk = { 15, 195, 395, 365 };
+    DrawPanel(hdc, disk, CLR_DISK, L"DISK  (C:\\)");
+
+    swprintf(buf, 256, L"Space:    %.1f%% used", currentDiskSpace);
+    DrawText2(hdc, 27, 212, 355, buf, CLR_TEXT);
+
+    swprintf(buf, 256, L"I/O:      %.1f%% active", currentDiskIO);
+    DrawText2(hdc, 27, 230, 355, buf, CLR_TEXT);
+
+    // Two bars
+    DrawText2(hdc, 27, 295, 60, L"Space", CLR_DIM);
+    DrawBar(hdc, { 27, 313, 383, 327 }, (float)currentDiskSpace, CLR_DISK);
+
+    DrawText2(hdc, 27, 330, 60, L"I/O", CLR_DIM);
+    DrawBar(hdc, { 27, 348, 383, 362 }, (float)currentDiskIO, CLR_DISK);
+
+    // ── NETWORK ───────────────────────────────────────────────────────────────
+    RECT net = { 405, 195, 785, 365 };
+    DrawPanel(hdc, net, CLR_NET, L"NETWORK");
+    swprintf(buf, 256, L"Upload:   %.2f KB/s", currentNetworkUp);
+    DrawText2(hdc, 417, 212, 355, buf, CLR_TEXT);
+    swprintf(buf, 256, L"Download: %.2f KB/s", currentNetworkDown);
+    DrawText2(hdc, 417, 230, 355, buf, CLR_TEXT);
+    DrawBar(hdc, { 417, 315, 773, 329 }, (float)min(currentNetworkUp / 1024.0 * 100.0, 100.0), CLR_NET);
+    DrawBar(hdc, { 417, 335, 773, 349 }, (float)min(currentNetworkDown / 1024.0 * 100.0, 100.0), CLR_NET);
+
+    // ── NVIDIA ────────────────────────────────────────────────────────────────
+    RECT nv = { 15, 375, 395, 545 };
+    DrawPanel(hdc, nv, CLR_NVIDIA, L"NVIDIA RTX 3050 Ti");
+    swprintf(buf, 256, L"Usage:   %d%%", currentNvidiaUsage);
+    DrawText2(hdc, 27, 392, 355, buf, CLR_TEXT);
+    swprintf(buf, 256, L"VRAM:    %llu / %llu MB",
+        currentNvidiaVRAMUsed / 1024 / 1024,
+        currentNvidiaVRAMTotal / 1024 / 1024);
+    DrawText2(hdc, 27, 410, 355, buf, CLR_TEXT);
+    swprintf(buf, 256, L"Temp:    %u C", currentNvidiaTemp);
+    DrawText2(hdc, 27, 428, 355, buf, CLR_TEXT);
+    swprintf(buf, 256, L"Clock:   %u MHz", currentNvidiaClock);
+    DrawText2(hdc, 27, 446, 355, buf, CLR_TEXT);
+    DrawBar(hdc, { 27, 515, 383, 529 }, (float)currentNvidiaUsage, CLR_NVIDIA);
+
+    // ── AMD ───────────────────────────────────────────────────────────────────
+    RECT amd = { 405, 375, 785, 545 };
+    DrawPanel(hdc, amd, CLR_AMD, L"AMD RADEON");
+    swprintf(buf, 256, L"Usage:   %.1f%%", currentAMDUsage);
+    DrawText2(hdc, 417, 392, 355, buf, CLR_TEXT);
+    DrawBar(hdc, { 417, 515, 773, 529 }, (float)currentAMDUsage, CLR_AMD);
+}
 
 void AlertThread() {
-	while (updateFlag) {
-		CheckAndShowAlerts(); // Check and show alerts
-		this_thread::sleep_for(1s); // Sleep for 1 second
-	}
+    while (updateFlag) {
+        CheckAndShowAlerts();
+        this_thread::sleep_for(1s);
+    }
 }
 
-thread alertThread(AlertThread); // Thread for showing alerts
+_Use_decl_annotations_
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    WNDCLASS SoftwareMainClass = NewWindowClass(
+        (HBRUSH)COLOR_WINDOW,
+        LoadCursor(NULL, IDC_ARROW),
+        hInstance,
+        LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1)),
+        L"MainWNDClass",
+        SoftwareMainProcedure
+    );
 
-// The entry point of the program
-// HINSTANCE hInstance: The instance of the program
-// HINSTANCE hPrevInstance: The previous instance of the program
-// LPSTR lpCmdLine: The command line arguments
-// int nCmdShow: The display options
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-{
-	fontRectangle = CreateFontA(
-		20, // Height of the font
-		0, // Width of the font
-		0, // Angle of escapement
-		0, // Orientation angle
-		FW_NORMAL, // Font weight
-		FALSE, // Italic
-		FALSE, // Underline
-		FALSE, // Strikeout
-		ANSI_CHARSET, // Character set
-		OUT_DEFAULT_PRECIS, // Output precision
-		CLIP_DEFAULT_PRECIS, // Clipping precision
-		DEFAULT_QUALITY, // Output quality
-		DEFAULT_PITCH, // Pitch and family
-		"Consolas" // Font name
-	);
+    if (!RegisterClass(&SoftwareMainClass)) {
+        MessageBox(NULL, L"Window Registration Failed!", L"Error!", MB_ICONEXCLAMATION | MB_OK);
+        return -1;
+    }
 
-	// Create a new window class for the main window
-	WNDCLASS SoftwareMainClass = NewWindowClass(
-		(HBRUSH)COLOR_WINDOW, // Background color of the window
-		LoadCursor(NULL, IDC_ARROW), // Cursor of the window
-		hInstance, // Instance of the window
-		LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1)), // Icon of the window
-		L"MainWNDClass", // Name of the window class
-		SoftwareMainProcedure // Window procedure of the window
-	);
+    InitFonts();
 
-	// Register the window class
-	// If registration fails, show an error message and return -1
-	if (!RegisterClass(&SoftwareMainClass)) {
-		MessageBox(NULL, L"Window Registration Failed!", L"Error!", MB_ICONEXCLAMATION | MB_OK);
-		return -1;
-	}
+    MSG SoftwareMainMessage = { 0 };
 
-	
-	MSG SoftwareMainMessage = { 0 }; // Message structure for the main window
+    CreateWindow(L"MainWNDClass", L"System Monitor",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        820, 620,   // ← fits the grid
+        NULL, NULL, hInstance, NULL);
 
-	// Create the main window
-	CreateWindow(
-		L"MainWNDClass", // Window class name
-		L"WinApi", // Window title
-		WS_OVERLAPPEDWINDOW | WS_VISIBLE, // Window style
-		CW_USEDEFAULT, // X position
-		CW_USEDEFAULT, // Y position
-		700, // Width
-		500, // Height
-		NULL, // Parent window
-		NULL, // Menu
-		hInstance, // Instance
-		NULL // Additional data
-	);
+    while (GetMessage(&SoftwareMainMessage, NULL, 0, 0)) {
+        TranslateMessage(&SoftwareMainMessage);
+        DispatchMessage(&SoftwareMainMessage);
+    }
 
-	// Message loop for the main window
-	while (GetMessage(&SoftwareMainMessage, NULL, 0, 0)) {
-		TranslateMessage(&SoftwareMainMessage); // Translate the message
-		DispatchMessage(&SoftwareMainMessage); // Dispatch the message
-	}
-
-	return 0;
+    return 0;
 }
 
-// This is a function definition for creating a new window class, which defines the properties and behavior of a window
 WNDCLASS NewWindowClass(HBRUSH BGColor, HCURSOR Cursor, HINSTANCE hInst, HICON Icon, LPCWSTR Name, WNDPROC Procedure) {
-	WNDCLASS NWC = { 0 }; // New window class
-
-	NWC.hIcon = Icon; // Icon of the window
-	NWC.hCursor = Cursor; // Cursor of the window
-	NWC.hInstance = hInst; // Instance of the window
-	NWC.lpszClassName = Name; // Name of the window class
-	NWC.hbrBackground = BGColor; // Background color of the window
-	NWC.lpfnWndProc = Procedure; // Window procedure of the window
-
-	return NWC;
+    WNDCLASS NWC = { 0 };
+    NWC.hIcon = Icon;
+    NWC.hCursor = Cursor;
+    NWC.hInstance = hInst;
+    NWC.lpszClassName = Name;
+    NWC.hbrBackground = BGColor;
+    NWC.lpfnWndProc = Procedure;
+    return NWC;
 }
 
-// This is a function definition for the window procedure. 
-// The function is used to process messages sent to the window (like button clicks, key presses, etc.)
-// HWND hWnd: The handle to the window
-// UINT uMsg: The message sent to the window
-// WPARAM wParam: Additional message information
-// LPARAM lParam: Additional message information
 LRESULT CALLBACK SoftwareMainProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-	// Process the message
-	switch (uMsg) {
-		case WM_COMMAND:
-			switch (LOWORD(wParam)) {
-				case MENU_NEW:
-					MessageBox(hWnd, L"New menu item clicked!", L"Menu", MB_OK);
-					break;
-				case MENU_OPEN:
-					/*LoadData("D:\\Projects\\winapi\\output.txt");*/
-					if (GetOpenFileNameA(&ofn)) {
-						LoadData(ofn.lpstrFile);
-					}break;
-				case MENU_SAVE:
-					if (GetSaveFileNameA(&ofn)) {
-						SaveData(ofn.lpstrFile);
-					}
-					/*SaveData("D:\\Projects\\winapi\\output.txt");*/
-					break;
-				case MENU_EXIT:
-					DestroyWindow(hWnd);
-					break;
-				case MENU_CUT:
-					MessageBox(hWnd, L"Cut menu item clicked!", L"Menu", MB_OK);
-					break;
-				case MENU_COPY:
-					MessageBox(hWnd, L"Copy menu item clicked!", L"Menu", MB_OK);
-					break;
-				case MENU_PASTE:
-					MessageBox(hWnd, L"Paste menu item clicked!", L"Menu", MB_OK);
-					break;
-				case BTN_READ:
-					// Read Strings with Buffer
-					// readChars = GetWindowTextA(hEditControl, Buffer, TEXT_BUFFER_SIZE); // Get the text from the edit control
-					// SetWindowTextA(hStaticControl, Buffer); // Set the text of the static control
-					// SetWindowTextA(hStaticControl, ("Symbols read: " + to_string(readChars)).c_str()); // Set the text of the static control
-					num = GetDlgItemInt(hWnd, DIGIT_INDEX_NUMBER, NULL, FALSE);
-					SetWindowTextA(hStaticControl, ("Number read: " + to_string(num)).c_str());
+    switch (uMsg) {
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case MENU_EXIT:
+            DestroyWindow(hWnd);
+            break;
+        }
+        break;
 
-					break;
-				case BTN_READ_CLR:
-					clrR = GetDlgItemInt(hWnd, DLG_INDEX_COLOR_R, NULL, FALSE);
-					clrG = GetDlgItemInt(hWnd, DLG_INDEX_COLOR_G, NULL, FALSE);
-					clrB = GetDlgItemInt(hWnd, DLG_INDEX_COLOR_B, NULL, FALSE);
+    case WM_CLOSE:
+        DestroyWindow(hWnd);
+        break;
 
-					brushRectangle = CreateSolidBrush(RGB(clrR, clrG, clrB));
-					fontColor = RGB(255 - clrR, 255 - clrG, 255 - clrB);
+    case WM_CREATE:
+        SetTimer(hWnd, 1, 1000, NULL);
+        MainWndAddMenus(hWnd);
+        MainWndAddWidgets(hWnd);
+        PostMessage(hWnd, WM_START_THREADS, 0, 0);
+        break;
 
-					RedrawWindow(hWnd, NULL, NULL, RDW_UPDATENOW | RDW_INVALIDATE);
-					break;
-				case BTN_CLS:
-					SetWindowText(hEditControl, L"");
-					break;
-			}break;
-		case WM_CLOSE:
-			DestroyWindow(hWnd);
-			break;
-		case WM_CREATE:
-			MainWndAddMenus(hWnd);
-			MainWndAddWidgets(hWnd);
-			SetOpenFileParameters(hWnd);
+    case WM_START_THREADS:
+        cpuThread = thread(UpdateCPUUsage);
+        ramThread = thread(UpdateMemoryUsage);
+        diskThread = thread(UpdateDiskUsage);
+        networkThread = thread(UpdateNetworkUsage);
+        alertThread = thread(AlertThread);
+        gpuThread = thread(UpdateGPUUsage);
+        break;
 
-			SendMessage(hStaticControl, WM_SETFONT, (WPARAM)fontRectangle, TRUE);
-			// Post a message to start the threads after the widgets are added
-			PostMessage(hWnd, WM_START_THREADS, 0, 0);
-			break;
+    case WM_DESTROY:
+        KillTimer(hWnd, 1);
+        if (g_font)     DeleteObject(g_font);
+        if (g_fontBold) DeleteObject(g_fontBold);
 
-		case WM_START_THREADS:
-			// Start the threads after widgets are added
-			cpuThread = thread(UpdateCPUUsage); // Create and start the thread for CPU usage
-			ramThread = thread(UpdateMemoryUsage); // Create and start the thread for memory usage
-			diskThread = thread(UpdateDiskUsage); // Create and start the thread for disk usage
-			networkThread = thread(UpdateNetworkUsage); // Start network monitoring
+        updateFlag = false;
+        if (cpuThread.joinable())     cpuThread.join();
+        if (ramThread.joinable())     ramThread.join();
+        if (diskThread.joinable())    diskThread.join();
+        if (networkThread.joinable()) networkThread.join();
+        if (alertThread.joinable())   alertThread.join();
+        PostQuitMessage(0);
+        break;
 
-			break;
-		case WM_DESTROY:
-			updateFlag = false;
+    case WM_TIMER:
+        InvalidateRect(hWnd, NULL, FALSE);
+        break;
 
-			if (cpuThread.joinable()) cpuThread.join();
-			if (ramThread.joinable()) ramThread.join();			
-			if (diskThread.joinable()) ramThread.join();
-			if (networkThread.joinable()) networkThread.join();
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
 
-			DeleteObject(brushRectangle);
-			DeleteObject(fontRectangle);
+        RECT cr; GetClientRect(hWnd, &cr);
+        HDC     memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBmp = CreateCompatibleBitmap(hdc, cr.right, cr.bottom);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
 
-			PostQuitMessage(0);
-			break;
-		case WM_PAINT:
-			BeginPaint(hWnd, &ps);
-			FillRect(ps.hdc, &rc, brushRectangle);
+        HBRUSH bgBrush = CreateSolidBrush(CLR_BG);
+        FillRect(memDC, &cr, bgBrush);
+        DeleteObject(bgBrush);
 
-			SetBkMode(ps.hdc, TRANSPARENT);
-			SetTextColor(ps.hdc, fontColor);
-			SelectObject(ps.hdc, fontRectangle);
-			DrawTextA(ps.hdc, "Hello, WinAPI!", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        PaintAll(memDC);
 
-			EndPaint(hWnd, &ps);
-			break;
-		default:
-			return DefWindowProc(hWnd, uMsg, wParam, lParam);
-	}
+        BitBlt(hdc, 0, 0, cr.right, cr.bottom, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+        DeleteObject(memBmp);
+        DeleteDC(memDC);
+        EndPaint(hWnd, &ps);
+        break;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+
+    default:
+        return DefWindowProc(hWnd, uMsg, wParam, lParam);
+    }
+    return 0;
 }
-
-
-
-// File Processing
-
-void SaveData(LPCSTR path) {
-	HANDLE FileToSave = CreateFileA(
-		path, 
-		GENERIC_WRITE, 
-		0, 
-		NULL, 
-		CREATE_ALWAYS, 
-		FILE_ATTRIBUTE_NORMAL, 
-		NULL
-	); // Create a new file
-
-	int saveLength = GetWindowTextLength(hEditControl); // Get the length of the text in the edit control
-	char* saveBuffer = new char[saveLength + 1]; // Create a buffer to store the text
-
-	saveLength = GetWindowTextA(hEditControl, saveBuffer, saveLength + 1); // Get the text from the edit control
-
-	DWORD bytesIterated; // Bytes written to the file
-	WriteFile(FileToSave, saveBuffer, saveLength, &bytesIterated, NULL); // Write the text to the file
-
-	// **Explicitly truncate the file after writing**
-	SetFilePointer(FileToSave, bytesIterated, NULL, FILE_BEGIN); // Move pointer to the correct position
-	SetEndOfFile(FileToSave); // Truncate anything beyond the written data
-
-	CloseHandle(FileToSave); // Close the file
-	delete[] saveBuffer; // Delete the buffer
-}
-
-void LoadData(LPCSTR path) {
-	HANDLE FileToLoad = CreateFileA(
-		path,
-		GENERIC_READ,
-		0,
-		NULL,
-		OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL,
-		NULL
-	); // Open the file
-
-	DWORD bytesIterated;
-	ReadFile(
-		FileToLoad, 
-		Buffer, 
-		TEXT_BUFFER_SIZE, 
-		&bytesIterated, 
-		NULL); // Read the file
-
-	SetWindowTextA(hEditControl, Buffer); // Set the text of the edit control
-	CloseHandle(FileToLoad); // Close the file
-}
-
-void SetOpenFileParameters(HWND hWND) {
-	ZeroMemory(&ofn, sizeof(ofn)); // Clear the memory of the open file dialog
-
-	ofn.lStructSize = sizeof(ofn); // Set the size of the structure
-	ofn.hwndOwner = hWND; // Set the owner of the dialog
-	ofn.lpstrFile = filename; // Set the file name
-	ofn.nMaxFile = sizeof(filename); // Set the maximum file size
-	ofn.lpstrFilter = "*.txt";
-	ofn.lpstrFileTitle = NULL;
-	ofn.nMaxFileTitle = 0;
-	ofn.lpstrInitialDir = "D:\\Projects\\winapi";
-	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-}
-

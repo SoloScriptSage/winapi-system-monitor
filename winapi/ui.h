@@ -4,16 +4,6 @@
 
 #include <windows.h>
 
-// Global variables for UI controls
-extern HWND hStaticControl;
-extern HWND hEditControl;
-extern HWND hNumberControl;
-extern HWND hCPU;
-extern HWND hRAM;
-extern HWND hDisk;
-extern HWND hNetwork;
-extern RECT rc;
-
 #define DIGIT_INDEX_NUMBER 200
 
 #define DLG_INDEX_COLOR_R 201
