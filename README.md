@@ -1,57 +1,43 @@
 # WinAPI System Monitor
 
-## Overview
-WinAPI System Monitor is a Windows application built using the Windows API (WinAPI). It provides real-time monitoring of CPU usage, memory load, and basic file operations such as saving and loading data.
+A lightweight Windows system monitoring application built with the Win32 API. Displays real-time CPU, RAM, disk, network, and GPU usage in a dark-themed grid UI with colored progress bars.
 
 ## Features
-- **CPU Usage Monitoring**: Displays per-core and overall CPU utilization.
-- **Memory Usage Monitoring**: Shows the current memory load.
-- **File Operations**: Supports saving and loading text files.
-- **Customizable UI**: Includes basic UI elements like buttons, text fields, and menus.
-- **Multithreaded Performance**: Uses threads to update CPU and RAM stats in real-time.
 
-## Technologies Used
-- **C++**
-- **Windows API (WinAPI)**
-- **Multithreading (std::thread)**
-- **Process Status API (psapi.h)**
-- **IP Helper API (iphlpapi.h)**
+- **CPU** — per-core usage tracking via `NtQuerySystemInformation`
+- **Memory** — system RAM load percentage via `GlobalMemoryStatusEx`
+- **Disk** — both storage space used and I/O activity on C:\
+- **Network** — real-time upload and download speed in KB/s
+- **NVIDIA GPU** — usage, VRAM, temperature and clock speed via NVML (dynamic loading of `nvml.dll`)
+- **AMD GPU** — usage percentage via PDH performance counters
+- **Alerts** — pop-up warnings when CPU, RAM or disk exceed configurable thresholds (30s cooldown between alerts)
 
-## Installation
-### Prerequisites
-- Windows OS
-- Microsoft Visual Studio (or any C++ compiler supporting WinAPI)
+## Building
 
-### Build Instructions
+### Requirements
+
+- Windows 10 or later
+- Visual Studio 2022 with the **Desktop development with C++** workload
+- Windows SDK 10.0.22621.0 or later
+- NVIDIA drivers installed (for GPU monitoring — `nvml.dll` must be present in `C:\Windows\System32`)
+
+### Steps
+
 1. Clone the repository:
-   ```sh
-   git clone https://github.com/SoloScriptSage/winapi.git
-   cd winapi
-   ```
-2. Open the project in Visual Studio.
-3. Build the project (`Ctrl + Shift + B`).
-4. Run the application.
+```bash
+   git clone https://github.com/SoloScriptSage/winapi-system-monitor.git
+```
+2. Open `winapi.vcxproj` in Visual Studio
+3. Set configuration to **Debug x64** or **Release x64**
+4. Build with `Ctrl+Shift+B`
+5. Run with `F5`
 
-## Usage
-- **Monitoring**: CPU and RAM usage are displayed in real-time.
-- **File Operations**:
-  - Open a text file to load content.
-  - Save current text input to a file.
-- **UI Controls**:
-  - Buttons for clearing input and reading text fields.
-  - Menu options for opening, saving, and exiting the application.
+## Roadmap
 
-## Code Structure
-- **software-main.cpp**: Main application logic, window handling, and monitoring functions.
-- **software-definitions.h**: Contains constants, function prototypes, and global variables.
-- **resource.h**: Defines resource identifiers for UI components.
-
-## Contributing
-Contributions are welcome! Feel free to submit issues or pull requests.
-
-## License
-This project is licensed under the MIT License.
-
-## Contact
-For any inquiries, contact vladyslavhirchukbusiness@outlook.com.
-
+- [ ] GPU temperature graph over time
+- [ ] Per-core CPU usage bars
+- [ ] Multiple disk support (C:, D:, etc.)
+- [ ] Configurable alert thresholds via settings window
+- [ ] Full AMD GPU support via ADL SDK (currently only usage % via PDH)
+- [ ] System tray icon with quick stats on hover
+- [ ] Export stats to CSV
